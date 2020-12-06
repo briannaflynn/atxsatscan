@@ -1,0 +1,580 @@
+---
+title: "Spatial Epidemiology and Kulldorff Spatial Scan Statistic"
+author: "Brianna Flynn"
+date: 
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(leaflet)
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE)
+
+opts_chunk$set(fig.width=12, fig.height=8)
+
+library(tidyverse)
+library(rgdal)
+library(rgeos)
+library(maptools)
+library(ggalt)
+library(ggthemes)
+library(ggrepel)
+library(RColorBrewer)
+
+#### Prepare austinMap polygon data, spatial polygon dataframe -------------
+# Prepare the zip poly data for US
+mydata <- readOGR(dsn = "/Users/brie/Desktop/Mol290C Project/cb_2016_us_zcta510_500k", layer = "cb_2016_us_zcta510_500k")
+class(mydata)
+head(mydata@data)
+
+# Austin Texas zip code data
+zip <- read_csv("/Users/brie/Desktop/Mol290C Project/zip_codes.csv")
+zip
+summary(zip)
+
+zipVec <- pull(zip)
+zipVec
+
+
+austinMap<- mydata[mydata@data$ZCTA5CE10 %in% zipVec, ]
+austinMap@data
+
+set.seed(111)
+austinMap$value <- sample.int(n = 10000, size = nrow(austinMap), replace = TRUE)
+
+
+atxMap <- fortify(austinMap)
+
+austinMap.df <- as(austinMap, "data.frame")
+centers <- data.frame(gCentroid(spgeom = austinMap, byid = TRUE))
+centers$zip <- rownames(centers)
+
+```
+
+## SMR - Finding the ratio of Observed to Expected COVID-19 Cases in Austin, Texas 
+First, I calculated the ratio of observed to expected cases for each zip code. 
+
+This was accomplished by first finding the number of expected cases from each strata or each sub-category of the five contextual factors **(first by computing strata-specific rates of COVID-19 cases by dividing the number of cases per strata by the population of people in each strata, and adding up all strata for a given zip code to give the total expected counts)**. The ratio of observed to expected counts of COVID-19 cases is displayed as SMR (from the epidemiology term standardized mortality ratio) in the legend and labels of each zip code in the figure. 
+
+Expected counts that were less than 1 were excluded from the analysis, and are referenced by a gray color for "NA".
+
+I found that among the five contextual factor maps, there were conserved "hot spots" in case burden within the city of Austin. These conserved hot spots were within southeast Austin around the Riverside and Oltorf neighborhoods, in north central Austin east of the North Loop and Airport Blvd neighborhoods, and in northwest Austin near the cities of Leander and Georgetown. 
+
+```{r, echo=FALSE, message=FALSE}
+library(leaflet)
+library(SpatialEpi)
+library(sp)
+
+# map 0, 1, 2, 3, and 4 
+
+#### Insurance status ---------
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+cols <- colnames(nhgis)
+
+
+
+test_nhgis <- nhgis %>% pivot_longer(c(`Total With Health Insurance`, `Total Without Health Insurance`), names_to = "insur_type", values_to = "population")
+
+
+test_nhgis <- test_nhgis[order(test_nhgis$Zipcode, test_nhgis$population, test_nhgis$insur_type), ]
+
+# calculatign expected using SpatialEpi library
+E <- expected(population = test_nhgis$population, cases = test_nhgis$Cases, n.strata = 2)
+
+
+# Cases by Zip Code
+zipCases <- read_csv("/Users/brie/Desktop/Mol290C Project/zipCases.csv")
+
+g <- zipCases
+g$E <- E
+
+g$SMR <- g$Cases/g$E
+
+
+insur_stats <- g
+
+austinMap$cases <- g$Cases
+austinMap$E <- g$E
+austinMap$SMR <- g$SMR
+
+pal <- colorNumeric(palette = "YlOrRd", domain = austinMap$SMR)
+labels <- sprintf("<strong>%s</strong><br/>Observed: %s <br/>Expected: %s <br/>SMR: %s",
+                  austinMap$ZCTA5CE10, austinMap$cases,  round(austinMap$E, 2), round(austinMap$SMR, 2)) %>%
+  lapply(htmltools::HTML)
+
+map <- leaflet(austinMap, width = 900, height = 400) %>% addTiles() %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5) %>%
+  addLegend(pal = pal, values = ~SMR, opacity = 0.5, title = "SMR", position = "bottomright") %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5,
+                  highlightOptions = highlightOptions(weight = 4),
+                  label = labels,
+                  labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"),
+                                              textsize = "15px", direction = "auto"))
+
+
+#### Educational attainment -------
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+cols <- colnames(nhgis)
+
+test_nhgis <- nhgis %>% pivot_longer(c(`Regular high school diploma`, `Bachelor's degree`, `Doctorate degree`), names_to = "edu_type", values_to = "population")
+
+
+test_nhgis <- test_nhgis[order(test_nhgis$Zipcode, test_nhgis$population, test_nhgis$edu_type), ]
+
+
+# calculating expected using SpatialEpi library
+E <- expected(population = test_nhgis$population, cases = test_nhgis$Cases, n.strata = 3)
+
+# Cases by Zip Code
+zipCases <- read_csv("/Users/brie/Desktop/Mol290C Project/zipCases.csv")
+
+
+g <- zipCases
+g$E <- E
+g$E[g$E<=1] <- NA 
+g$SMR <- g$Cases/g$E
+
+
+education_stats <- g
+
+austinMap$cases <- g$Cases
+austinMap$E <- g$E
+austinMap$SMR <- g$SMR
+
+
+
+pal <- colorNumeric(palette = "YlOrRd", domain = austinMap$SMR)
+labels <- sprintf("<strong>%s</strong><br/>Observed: %s <br/>Expected: %s <br/>SMR: %s",
+                  austinMap$ZCTA5CE10, austinMap$cases,  round(austinMap$E, 2), round(austinMap$SMR, 2)) %>%
+  lapply(htmltools::HTML)
+
+map1 <- leaflet(austinMap, width = 900, height = 400) %>% addTiles() %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5) %>%
+  addLegend(pal = pal, values = ~SMR, opacity = 0.5, title = "SMR", position = "bottomright") %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5,
+                  highlightOptions = highlightOptions(weight = 4),
+                  label = labels,
+                  labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"),
+                                              textsize = "15px", direction = "auto"))
+
+
+### Transit ---------
+
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+cols <- colnames(nhgis)
+
+test_nhgis <- nhgis
+
+test_nhgis <- test_nhgis %>% pivot_longer(c(`Car, truck, or van`, `Public transportation (excluding taxicab)`, `Worked at home`), names_to = "transit_type", values_to = "population")
+
+
+test_nhgis <- test_nhgis[order(test_nhgis$Zipcode, test_nhgis$population, test_nhgis$transit_type), ]
+
+# calculatign expected using SpatialEpi library
+E <- expected(population = test_nhgis$population, cases = test_nhgis$Cases, n.strata = 3)
+
+
+# Cases by Zip Code
+zipCases <- read_csv("/Users/brie/Desktop/Mol290C Project/zipCases.csv")
+
+
+g <- zipCases
+g$E <- E
+
+g$SMR <- g$Cases/g$E
+
+
+transit_stats <- g
+
+austinMap$cases <- g$Cases
+austinMap$E <- g$E
+austinMap$SMR <- g$SMR
+
+pal <- colorNumeric(palette = "YlOrRd", domain = austinMap$SMR)
+labels <- sprintf("<strong>%s</strong><br/>Observed: %s <br/>Expected: %s <br/>SMR: %s",
+                  austinMap$ZCTA5CE10, austinMap$cases,  round(austinMap$E, 2), round(austinMap$SMR, 2)) %>%
+  lapply(htmltools::HTML)
+
+
+map2 <- leaflet(austinMap, width = 900, height = 400) %>% addTiles() %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5) %>%
+  addLegend(pal = pal, values = ~SMR, opacity = 0.5, title = "SMR", position = "bottomright") %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5,
+                  highlightOptions = highlightOptions(weight = 4),
+                  label = labels,
+                  labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"),
+                                              textsize = "15px", direction = "auto"))
+#### Income (number of individuals on cash public assistance or Food Stamps/SNAP) ---------------
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+cols <- colnames(nhgis)
+
+test_nhgis <- nhgis
+
+test_nhgis <- test_nhgis %>% pivot_longer(c(`With cash public assistance or Food Stamps/SNAP`, `No cash public assistance or Food Stamps/SNAP`), names_to = "income_type", values_to = "population")
+
+
+test_nhgis <- test_nhgis[order(test_nhgis$Zipcode, test_nhgis$population, test_nhgis$income_type), ]
+
+
+# calculating expected using SpatialEpi library
+E <- expected(population = test_nhgis$population, cases = test_nhgis$Cases, n.strata = 2)
+
+
+# Cases by Zip Code
+zipCases <- read_csv("/Users/brie/Desktop/Mol290C Project/zipCases.csv")
+
+
+g <- zipCases
+g$E <- E
+g$E[g$E==0] <- NA ### zero breaks the code, so change to NA
+
+g$SMR <- g$Cases/g$E
+
+
+
+income_stats <- g
+
+austinMap$cases <- g$Cases
+
+austinMap$E <- g$E
+austinMap$SMR <- g$SMR
+
+pal <- colorNumeric(palette = "YlOrRd", domain = austinMap$SMR)
+labels <- sprintf("<strong>%s</strong><br/>Observed: %s <br/>Expected: %s <br/>SMR: %s",
+                  austinMap$ZCTA5CE10, austinMap$cases,  round(austinMap$E, 2), round(austinMap$SMR, 2)) %>%
+  lapply(htmltools::HTML)
+
+map3 <- leaflet(austinMap, width = 900, height = 400) %>% addTiles() %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5) %>%
+  addLegend(pal = pal, values = ~SMR, opacity = 0.5, title = "SMR", position = "bottomright") %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5,
+                  highlightOptions = highlightOptions(weight = 4),
+                  label = labels,
+                  labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"),
+                                              textsize = "15px", direction = "auto"))
+
+
+#### Race ---------------
+test_nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+
+
+test_nhgis <- test_nhgis %>% pivot_longer(c(White, `Black or African American`, `Asian alone`, `Hispanic or Latino`), names_to = "race", values_to = "population")
+
+
+test_nhgis <- test_nhgis[order(test_nhgis$Zipcode, test_nhgis$population, test_nhgis$race), ]
+
+# calculatign expected using SpatialEpi library
+E <- expected(population = test_nhgis$population, cases = test_nhgis$Cases, n.strata = 4)
+
+
+# Cases by Zip Code
+zipCases <- read_csv("/Users/brie/Desktop/Mol290C Project/zipCases.csv")
+
+g <- zipCases
+g$E <- E
+
+g$SMR <- g$Cases/g$E
+
+
+race_stats <- g
+
+austinMap$cases <- g$Cases
+austinMap$E <- g$E
+austinMap$SMR <- g$SMR
+
+pal <- colorNumeric(palette = "YlOrRd", domain = austinMap$SMR)
+labels <- sprintf("<strong>%s</strong><br/>Observed: %s <br/>Expected: %s <br/>SMR: %s",
+                  austinMap$ZCTA5CE10, austinMap$cases,  round(austinMap$E, 2), round(austinMap$SMR, 2)) %>%
+  lapply(htmltools::HTML)
+
+map4 <- leaflet(austinMap, width = 900, height = 400) %>% addTiles() %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5) %>%
+  addLegend(pal = pal, values = ~SMR, opacity = 0.5, title = "SMR", position = "bottomright") %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(SMR), fillOpacity = 0.5,
+                  highlightOptions = highlightOptions(weight = 4),
+                  label = labels,
+                  labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"),
+                                              textsize = "15px", direction = "auto"))
+
+```
+
+### Insurance Status (Insured or Without Health Insurance) Map 
+```{R map1, echo=FALSE}
+map
+```
+
+### Educational Attainment (High school diploma, Bachelor's degree, Doctorate degree) Map 
+```{R map2, echo=FALSE}
+map1
+```
+
+### Transit (Rode the bus, drove, or worked from home) Map  
+```{R map3, echo=FALSE}
+map2
+```
+
+### Income (number of individuals on cash public assistance or Food Stamps/SNAP) Map 
+```{R map4, echo=FALSE}
+map3
+```
+
+### Race and Ethnicity (White, Black or African American, Hispanic or Latino, and Asian) Map 
+```{R map5, echo=FALSE}
+map4
+```
+
+# Kulldorff Spatial Scan Statistic (discrete Poisson model)
+
+```{R, kulldorff, echo=FALSE, message=FALSE, results=FALSE}
+library(SpatialEpi)
+library(leaflet)
+##### Kulldorff Test ----------------------------------------
+kulldorff_test <-
+  function(geo, cases, population, expected.cases=NULL, pop.upper.bound, 
+           n.simulations, alpha.level, plot=TRUE){
+    
+    # Determine likelihood type: binomial or poisson
+    if(is.null(expected.cases)){
+      type <- "binomial"
+      denominator <- population
+      expected.cases <- sum(cases) * (denominator/sum(denominator))
+      # poisson case	
+    }else{
+      type <- "poisson"
+      denominator <- expected.cases
+    }
+    
+    # Get geographic information
+    geo.results <- zones(geo, population, pop.upper.bound)
+    nearest.neighbors <- geo.results$nearest.neighbors
+    cluster.coords <- geo.results$cluster.coords
+    n.zones <- nrow(cluster.coords)
+    
+    lkhd <- computeAllLogLkhd(cases, denominator, nearest.neighbors, n.zones, type)
+    
+    # Get areas included in most likely cluster
+    cluster.index <- which.max(lkhd)
+    
+    # cluster center and radial area
+    center <- cluster.coords[cluster.index,1]
+    end <- cluster.coords[cluster.index,2]
+    
+    # list of all areas included in cluster	
+    cluster <- nearest.neighbors[[center]]
+    cluster <- cluster[1:which(cluster == end)]
+    
+    #-------------------------------------------------------------------------------
+    # Compute Monte Carlo randomized p-value
+    #-------------------------------------------------------------------------------
+    # Simulate cases under null hypothesis of no area effects i.e. conditioned on E
+    perm <- rmultinom(n.simulations, round(sum(cases)), prob=denominator)
+    
+    # Compute simulated lambda's:  max log-lkhd in region
+    sim.lambda <- kulldorffMC(perm, denominator, nearest.neighbors, n.zones, type)
+    
+    # Compute Monte Carlo p-value
+    combined.lambda <- c(sim.lambda, max(lkhd))
+    p.value <- 1-mean(combined.lambda < max(lkhd))
+    
+    # Plot histogram
+    if(plot){
+      hist(combined.lambda, 
+           main="Monte Carlo Distribution of Lambda",
+           xlab=expression(log(lambda)))
+      abline(v=max(lkhd), col="red")
+      legend("top",
+             c(paste("Obs. log(Lambda) = ",round(max(lkhd),3),sep=""), 
+               paste("p-value = ", round(p.value,log10(n.simulations + 1)),sep="")),
+             lty=c(1, 1), 
+             col=c("red","white"), 
+             bty="n"
+      )
+    }
+    
+    
+    most.likely.cluster = list(
+      location.IDs.included = cluster,
+      population = sum(population[cluster]),	
+      number.of.cases = sum(cases[cluster]),
+      expected.cases = sum(expected.cases[cluster]),
+      SMR = sum(cases[cluster])/sum(expected.cases[cluster]),
+      log.likelihood.ratio = lkhd[cluster.index],
+      monte.carlo.rank = sum(combined.lambda >= lkhd[cluster.index]),
+      p.value = p.value
+    )
+    
+    results <- list(
+      most.likely.cluster=most.likely.cluster,
+      
+      type = type,
+      log.lkhd=lkhd,
+      simulated.log.lkhd=sim.lambda
+    )
+    return(results)
+  }
+
+
+
+#### Income Level (southern cluster)-----------------------------------------------------------
+## Set Parameters
+pop.upper.bound <- 0.10
+n.simulations <- 999
+alpha.level <- 0.05
+plot <- FALSE
+
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+
+income_nhgis <- nhgis %>% pivot_longer(c(`With cash public assistance or Food Stamps/SNAP`, `No cash public assistance or Food Stamps/SNAP`), names_to = "income_type", values_to = "population")
+
+coords <- latlong2grid(centers)
+c <- income_stats$Cases
+p <- income_nhgis$population
+E <- income_stats$E
+
+
+E[is.na(E)] <- 1
+
+poisson_income <- kulldorff_test(coords, c, p, E, pop.upper.bound, 
+                                 n.simulations, alpha.level, plot)
+
+clus_income <- poisson_income$most.likely.cluster$location.IDs.included
+
+# ## P-Value = 0.001
+# P_values <- P_values %>% add_column(
+#   income = 0.001
+# )
+
+#### Race (northern cluster)------------
+pop.upper.bound <- 0.10
+n.simulations <- 999
+alpha.level <- 0.05
+plot <- FALSE
+
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+race_nhgis <- nhgis %>% pivot_longer(c(White, `Black or African American`, `Asian alone`, `Hispanic or Latino`), names_to = "race", values_to = "population")
+coords <- latlong2grid(centers)
+c <- race_stats$Cases
+p <- race_nhgis$population
+E <- race_stats$E
+
+poisson_race <- kulldorff_test(coords, c, p, E, pop.upper.bound, 
+                               n.simulations, alpha.level, plot)
+
+clus_race <- poisson_race$most.likely.cluster$location.IDs.included
+
+# P_values <- P_values %>% add_column(
+#   race = 0.001
+# )
+
+
+
+#### Education (northern cluster) ------------
+pop.upper.bound <- 0.10
+n.simulations <- 999
+alpha.level <- 0.05
+plot <- FALSE
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+edu_nhgis <- nhgis %>% pivot_longer(c(`Regular high school diploma`, `Bachelor's degree`, `Doctorate degree`), names_to = "edu_type", values_to = "population")
+
+coords <- latlong2grid(centers)
+c <- education_stats$Cases
+p <- edu_nhgis$population
+E <- education_stats$E
+E[is.na(E)] <- 1
+
+poisson_education <- kulldorff_test(coords, c, p, E, pop.upper.bound, 
+                                    n.simulations, alpha.level, plot)
+
+clus_education <- poisson_education$most.likely.cluster$location.IDs.included
+
+# 
+# P_values <- P_values %>% add_column(
+#   education = 0.001
+# )
+
+
+#### Transit (southern cluster) ---------------------
+
+pop.upper.bound <- 0.10
+n.simulations <- 999
+alpha.level <- 0.05
+plot <- FALSE
+
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+transit_nhgis <- nhgis %>% pivot_longer(c(`Car, truck, or van`, `Public transportation (excluding taxicab)`, `Worked at home`), names_to = "transit_type", values_to = "population")
+
+coords <- latlong2grid(centers)
+c <- transit_stats$Cases
+p <- transit_nhgis$population
+E <- transit_stats$E
+
+poisson_transit <- kulldorff_test(coords, c, p, E, pop.upper.bound, 
+                                  n.simulations, alpha.level, plot)
+
+clus_transit <- poisson_transit$most.likely.cluster$location.IDs.included
+
+
+# P_values <- P_values %>% add_column(
+#   transit = 0.001
+# )
+
+
+#### Insurance status (northern Cluster) -------------
+pop.upper.bound <- 0.10
+n.simulations <- 999
+alpha.level <- 0.05
+plot <- FALSE
+
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+insur_nhgis <- nhgis %>% pivot_longer(c(`Total With Health Insurance`, `Total Without Health Insurance`), names_to = "insur_type", values_to = "population")
+
+coords <- latlong2grid(centers)
+c <- insur_stats$Cases
+p <- insur_nhgis$population
+E <- insur_stats$E
+
+poisson_insur <- kulldorff_test(coords, c, p, E, pop.upper.bound, 
+                                n.simulations, alpha.level, plot)
+
+clus_insur <- poisson_insur$most.likely.cluster$location.IDs.included
+
+## P-Value = 0.001
+
+# P_values <- P_values %>% add_column(
+#   insurance = 0.001
+# )
+
+
+
+#### Kulldorff Plot -------------------------
+## These share the same cluster
+nhgis <- read_csv("/Users/brie/Desktop/Mol290C Project/FilteredEvenMore_NHGIS.csv")
+
+
+# for every strata that has cluster at zip code, +1
+# else, 0
+# Kulldorff column is 0, or number of strata that cluster at a particular zipcode (range from 1 to 4)
+
+austinMap$cases <- g$Cases
+
+austinMap$Kulldorff <- nhgis$Kulldorff
+
+austinMap$Kulldorff
+
+
+```
+
+The Kulldorff Spatial Scan Statistic was used to identify an excess of COVID-19 cases within a moving cylindrical window that visits all zip codes within the greater Austin area, which increases in size of space scanned until it reaches an upper size limit. The likelihood ratio test statistic over all possible windows is calculated, conditioning on the observed total number of cases. This statistical test provided a measure of how unlikely it would be to encounter the observed excess of COVID-19 cases within a larger comparison region. All NA values were replaced with 1 prior to running the analysis.
+
+**I found that the populations stratified by race and ethnicity, insurance status, and educational attainment all shared the same Kulldorff cluster in North central Austin, and the populations stratified by transit method and income shared the same Kulldorff cluster in the southeast region of Austin, extending from Buda to the Austin Bergstrom International Airport, just south of Town lake.** Additionally, many of the zip codes found to have a high observed to expected COVID-19 case ratio in the previous analyses were conserved within the zip codes identified as Kulldorff clusters. 
+
+```{R, kulldorff_plots, echo=FALSE}
+
+pal <- colorNumeric(palette = "YlOrRd", domain = austinMap$Kulldorff)
+labels <- sprintf("<strong>%s</strong><br/>Observed: %s <br/>Number of Contextual Factors: %s ",
+                  austinMap$ZCTA5CE10, austinMap$cases, austinMap$Kulldorff) %>%
+  lapply(htmltools::HTML)
+
+map_kulldorff <- leaflet(austinMap, width = 900, height = 800) %>% addTiles() %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(Kulldorff), fillOpacity = 0.5) %>%
+  addLegend(pal = pal, values = ~Kulldorff, opacity = 0.5, title = "Kulldorff Clusters", position = "bottomright") %>% addPolygons(color = "grey", weight = 1, fillColor = ~pal(Kulldorff), fillOpacity = 0.5,
+                                                                                                                                   highlightOptions = highlightOptions(weight = 4),
+                                                                                                                                   label = labels,
+                                                                                                                                   labelOptions = labelOptions(style = list("font-weight" = "normal", padding ="3px 8px"),
+                                                                                                                                                               textsize = "15px", direction = "auto"))
+map_kulldorff
+
+```
