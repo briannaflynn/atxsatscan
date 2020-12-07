@@ -16,4 +16,7 @@ E: Insurance status (has health insurance, has no health insurance)
 
 ![](images/race,transit,income,education,insurance.png)
 
-Each of these choropleth maps displays the observed to expected case ratios for each contextual factor. 
+Each choropleth maps displays the observed to expected case ratios for each zip code, with respect to each contextual factor. 
+
+**Please refer to this link for interactive maps featuring per zip code labels [interactive maps](./SpatialEpidemiology_SpatialScan.html)**
+
