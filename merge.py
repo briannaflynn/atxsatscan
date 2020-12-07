@@ -6,9 +6,7 @@ import numpy as np
 
 nhgis_df = pd.read_csv("./nhgis.csv", delimiter=",")
 
-#print(nhgis_df["ZCTA5A"])
 working_df = pd.read_csv("./zip_codes.csv", delimiter=",")
-#print(working_df)
 
 df_final = nhgis_df.merge(working_df, on="ZCTA5A", how="inner")
 print(df_final)
