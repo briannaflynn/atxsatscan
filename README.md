@@ -15,3 +15,5 @@ D: Educational Attainment (high school Diploma, bachelor's, doctorate)
 E: Insurance status (has health insurance, has no health insurance)
 
 ![](images/race,transit,income,education,insurance.png)
+
+Each of these choropleth maps displays the observed to expected case ratios for each contextual factor. 
