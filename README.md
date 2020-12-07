@@ -18,6 +18,13 @@ E: Insurance status (has health insurance, has no health insurance)
 
 Each choropleth maps displays the observed to expected case ratios for each zip code, with respect to each contextual factor. 
 
+![](images/Kulldorff.png)
+This map displays the two major Kulldorff clusters obtained from the Poisson spatial scan statistic. 
+
+**Contextual factor analysis of race and ethnicity, educational attainment, and insurance status all produced a common cluster in north central Austin (located northeast of Airport Boulevard around East Rundberg Lane), while transit status and income level shared shared a larger cluster in southeast Austin (extending from Buda to east Riverside drive south of Town Lake).** 
+
+The scale in the legend corresponds to the number of contextual factors that demonstrated clustering at each zip code. 
+
 ### Please refer to [this link](./SpatialEpidemiology_SpatialScan.html) for interactive maps featuring per zip code labels 
-(download html > Save As > open downloaded html text file in browser)
+(download html > right or ctrl click Save As > open downloaded html text file in browser)
 
