@@ -1,15 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
-
-
 import pandas as pd
 import numpy as np
-
-
-# In[10]:
-
 
 nhgis_df = pd.read_csv("./nhgis.csv", delimiter=",")
 
@@ -23,8 +16,6 @@ print(df_final)
 
 df_final.to_csv("Filtered_NHGIS.csv", encoding="utf-8", index=False)
 
-
-# In[ ]:
 
 
 
